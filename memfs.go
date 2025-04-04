@@ -128,3 +128,66 @@ func (fs *FileSystem) Stat(path string) (FSInfo, error) {
 		UpdatedAt: node.UpdatedAt(),
 	}, nil
 }
+
+func (fs *FileSystem) DirSize(path string) (int64, error) {
+	node, err := fs.getNode(path)
+	if err != nil {
+		return 0, err
+	}
+	if !node.IsDir() {
+		return 0, fmt.Errorf("not a directory")
+	}
+	return fs.dirSizeRecursive(node.(*Directory)), nil
+}
+
+func (fs *FileSystem) dirSizeRecursive(dir *Directory) int64 {
+	var size int64
+	for _, child := range dir.children {
+		if child.IsDir() {
+			size += fs.dirSizeRecursive(child.(*Directory))
+		} else {
+			size += int64(len(child.(*File).content))
+		}
+	}
+	return size
+}
+
+func (fs *FileSystem) Mkdir(path string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if path == "/" {
+		return NewFSError(OpMkdir, path, ErrRootExists)
+	}
+
+	parentDir, baseName, err := fs.getParentDir(path)
+	if err != nil {
+		var fsErr *FSError
+		if errors.As(err, &fsErr) && errors.Is(fsErr.Err, ErrNotExist) {
+			err = fs.Mkdir(filepath.Dir(path))
+			if err != nil {
+				return err
+			}
+			parentDir, baseName, err = fs.getParentDir(path)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	if _, exists := parentDir.children[baseName]; exists {
+		return NewFSError(OpMkdir, path, ErrExist)
+	}
+
+	parentDir.children[baseName] = &Directory{
+		name:      baseName,
+		children:  make(map[string]FSNode),
+		createdAt: time.Now(),
+		updatedAt: time.Now(),
+	}
+
+	parentDir.updatedAt = time.Now()
+	return nil
+}
