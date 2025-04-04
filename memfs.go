@@ -92,3 +92,39 @@ func (fs *FileSystem) getParentDir(path string) (*Directory, string, error){
 
 	return dir,baseName,nil
 }
+
+func (fs *FileSystem) getOpenFileCount() int{
+	mu.RLock()
+	defer mu.RUnlock()
+	return fs.openFiles
+}
+
+func (fs *FileSystem) decrementOpenFiles(){
+	mu.Lock()
+	defer mu.Unlock()
+	fs.openFiles--
+}
+
+func (fs *FileSystem) Stat(path string) (FSInfo, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	node, err := fs.getNode(path)
+	if err != nil {
+		return FSInfo{}, err
+	}
+
+	var size int64
+	if !node.IsDir() {
+		file := node.(*File)
+		size = int64(len(file.content))
+	}
+
+	return FSInfo{
+		Name:      node.Name(),
+		IsDir:     node.IsDir(),
+		Size:      size,
+		CreatedAt: node.CreatedAt(),
+		UpdatedAt: node.UpdatedAt(),
+	}, nil
+}
