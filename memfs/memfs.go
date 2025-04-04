@@ -3,8 +3,6 @@ package memfs
 import (
 	"errors"
 	"fmt"
-	"io"
-	"bufio"
 	"path/filepath"
 	"strings"
 	"sync"

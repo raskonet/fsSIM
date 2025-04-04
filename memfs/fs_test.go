@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"your_project/memfs"
+	"github.com/raskonet/fsSIM/memfs"
 )
 
 func TestFSError(t *testing.T) {
 	err := memfs.NewFSError(memfs.OpOpen, "/file.txt", memfs.ErrNotExist)
-	assert.Equal(t, "open /file.txt: path does not exist", err.Error())
+	assert.Equal(t, "open /file.txt: file does not exist", err.Error())
 }
 
 func TestIsNotExist(t *testing.T) {
