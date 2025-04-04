@@ -254,3 +254,163 @@ func (fs *FileSystem) Open(path string) (*File, error) {
 
 	return file, nil
 }
+
+func (fs *FileSystem) ReadDir(path string) ([]FSNode, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	node, err := fs.getNode(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if !node.IsDir() {
+		return nil, NewFSError(OpReadDir, path, ErrNotDir)
+	}
+
+	dir := node.(*Directory)
+	result := make([]FSNode, 0, len(dir.children))
+
+	for _, child := range dir.children {
+		result = append(result, child)
+	}
+
+	return result, nil
+}
+
+func (fs *FileSystem) ReadFile(path string) ([]byte, error) {
+	fs.mu.RLock()
+	node, err := fs.getNode(path)
+	fs.mu.RUnlock()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if node.IsDir() {
+		return nil, NewFSError(OpReadFile, path, ErrIsDir)
+	}
+
+	file := node.(*File)
+	
+	fs.mu.RLock()
+	content := make([]byte, len(file.content))
+	copy(content, file.content)
+	fs.mu.RUnlock()
+
+	return content, nil
+}
+
+func (fs *FileSystem) WriteFile(path string, data []byte) error {
+	file, err := fs.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = file.Write(data)
+	return err
+}
+
+func (fs *FileSystem) Remove(path string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if path == "/" {
+		return NewFSError(OpRemove, path, ErrIsRoot)
+	}
+
+	parentDir, baseName, err := fs.getParentDir(path)
+	if err != nil {
+		return err
+	}
+
+	node, exists := parentDir.children[baseName]
+	if !exists {
+		return NewFSError(OpRemove, path, ErrNotExist)
+	}
+
+	if node.IsDir() {
+		dir := node.(*Directory)
+		if len(dir.children) > 0 {
+			return NewFSError(OpRemove, path, ErrDirNotEmpty)
+		}
+	}
+
+	delete(parentDir.children, baseName)
+	parentDir.updatedAt = time.Now()
+	return nil
+}
+
+func (fs *FileSystem) RemoveAll(path string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if path == "/" {
+		fs.root.children = make(map[string]FSNode)
+		fs.root.updatedAt = time.Now()
+		return nil
+	}
+
+	parentDir, baseName, err := fs.getParentDir(path)
+	if err != nil {
+		return err
+	}
+
+	_, exists := parentDir.children[baseName]
+	if !exists {
+		return NewFSError(OpRemoveAll, path, ErrNotExist)
+	}
+
+	delete(parentDir.children, baseName)
+	parentDir.updatedAt = time.Now()
+	return nil
+}
+
+func (fs *FileSystem) Rename(oldPath, newPath string) error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if oldPath == "/" {
+		return NewFSError(OpRename, oldPath, ErrIsRoot)
+	}
+
+	if newPath == "/" {
+		return NewFSError(OpRename, newPath, ErrIsRoot)
+	}
+
+	oldParentDir, oldBaseName, err := fs.getParentDir(oldPath)
+	if err != nil {
+		return err
+	}
+
+	oldNode, exists := oldParentDir.children[oldBaseName]
+	if !exists {
+		return NewFSError(OpRename, oldPath, ErrNotExist)
+	}
+
+	newParentDir, newBaseName, err := fs.getParentDir(newPath)
+	if err != nil {
+		return err
+	}
+
+	if _, exists := newParentDir.children[newBaseName]; exists {
+		return NewFSError(OpRename, newPath, ErrExist)
+	}
+
+	delete(oldParentDir.children, oldBaseName)
+	newParentDir.children[newBaseName] = oldNode
+
+	if file, ok := oldNode.(*File); ok {
+		file.name = newBaseName
+	} else if dir, ok := oldNode.(*Directory); ok {
+		dir.name = newBaseName
+	}
+
+	now := time.Now()
+	oldParentDir.updatedAt = now
+	newParentDir.updatedAt = now
+
+	return nil
+}
+
