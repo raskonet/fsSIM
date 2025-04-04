@@ -191,3 +191,66 @@ func (fs *FileSystem) Mkdir(path string) error {
 	parentDir.updatedAt = time.Now()
 	return nil
 }
+
+func (fs *FileSystem) Create(path string) (*File, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	if path == "/" {
+		return nil, NewFSError(OpCreate, path, ErrIsDir)
+	}
+
+	parentDir, baseName, err := fs.getParentDir(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if node, exists := parentDir.children[baseName]; exists {
+		if node.IsDir() {
+			return nil, NewFSError(OpCreate, path, ErrIsDir)
+		}
+		file := node.(*File)
+		file.content = []byte{}
+		file.position = 0
+		file.updatedAt = time.Now()
+		return file, nil
+	}
+
+	now := time.Now()
+	file := &File{
+		name:      baseName,
+		content:   []byte{},
+		position:  0,
+		createdAt: now,
+		updatedAt: now,
+		fs:        fs,
+	}
+	parentDir.children[baseName] = file
+	parentDir.updatedAt = now
+
+	fs.openFiles++
+
+	return file, nil
+}
+
+func (fs *FileSystem) Open(path string) (*File, error) {
+	fs.mu.RLock()
+	node, err := fs.getNode(path)
+	if err != nil {
+		fs.mu.RUnlock()
+		return nil, err
+	}
+
+	if node.IsDir() {
+		fs.mu.RUnlock()
+		return nil, NewFSError(OpOpen, path, ErrIsDir)
+	}
+
+	file := node.(*File)
+	fs.mu.RUnlock()
+	fs.mu.Lock()
+	fs.openFiles++
+	fs.mu.Unlock()
+
+	return file, nil
+}
